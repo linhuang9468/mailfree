@@ -1,5 +1,9 @@
 import { cacheGet, cacheSet, readPrefetch, setCurrentUserKey } from './storage.js';
 
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 window.__GUEST_MODE__ = false;
 window.__MOCK_STATE__ = { domains: ['example.com'], mailboxes: [], emailsByMailbox: new Map() };
 
@@ -1060,7 +1064,7 @@ async function refresh(){
                  <span class="btn-icon">🗑️</span>
                </button>
              ` : `
-               <button class="btn btn-secondary btn-sm" data-code="${listCode || ''}" onclick="copyFromList(event, ${e.id});event.stopPropagation()" title="复制内容或验证码">
+               <button class="btn btn-secondary btn-sm" data-code="${escapeHtml(listCode || '')}" onclick="copyFromList(event, ${e.id});event.stopPropagation()" title="复制内容或验证码">
                  <span class="btn-icon">📋</span>
                </button>
                <button class="btn btn-danger btn-sm" onclick="deleteEmail(${e.id});event.stopPropagation()" title="删除邮件">
@@ -1110,7 +1114,7 @@ window.showEmail = async (id) => {
     }
     els.modalSubject.innerHTML = `
       <span class="modal-icon">📧</span>
-      <span>${email.subject || '(无主题)'}</span>
+      <span>${escHtml(email.subject) || '(无主题)'}</span>
     `;
     
     // 原样展示：优先 html_content 以 iframe 渲染；无 HTML 时以纯文本显示
@@ -1119,17 +1123,17 @@ window.showEmail = async (id) => {
     const plainForCode = `${email.subject || ''} ` + (rawHtml || rawText).replace(/<[^>]+>/g, ' ').replace(/\s+/g,' ').trim();
     const code = extractCode(plainForCode);
     const downloadBtn = email.download ? `
-      <a class="btn btn-ghost btn-sm" href="${email.download}" download>
+      <a class="btn btn-ghost btn-sm" href="${escHtml(email.download)}" download>
         <span class="btn-icon">⬇️</span>
         <span>下载原始邮件</span>
       </a>` : '';
-    const toLine = (email.to_addrs || email.recipients || '').toString();
-    const timeLine = formatTs(email.received_at || email.created_at);
-    const subjLine = (email.subject || '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c] || c));
+    const toLine = escHtml(email.to_addrs || email.recipients || '');
+    const timeLine = escHtml(formatTs(email.received_at || email.created_at));
+    const subjLine = escHtml(email.subject || '');
 
     els.modalContent.innerHTML = `
       <div class="email-meta-inline" style="margin:4px 0 8px 0;color:#334155;font-size:14px">
-        <span>发件人：${email.sender || ''}</span>
+        <span>发件人：${escHtml(email.sender || '')}</span>
         ${toLine ? `<span style=\"margin-left:12px\">收件人：${toLine}</span>` : ''}
         ${timeLine ? `<span style=\"margin-left:12px\">时间：${timeLine}</span>` : ''}
         ${subjLine ? `<span style=\"margin-left:12px\">主题：${subjLine}</span>` : ''}
@@ -1140,7 +1144,7 @@ window.showEmail = async (id) => {
           <span>复制内容</span>
         </button>
         ${code ? `
-          <button class=\"btn btn-primary btn-sm\" onclick=\"copyCodeInModal('${code}', this)\">
+          <button class=\"btn btn-primary btn-sm\" onclick=\"copyCodeInModal('${escHtml(code).replace(/'/g,'\\&#39;')}', this)\">
             <span class=\"btn-icon\">🔐</span>
             <span>复制验证码</span>
           </button>
@@ -1153,28 +1157,25 @@ window.showEmail = async (id) => {
     const host = document.getElementById('email-render-host');
     if (rawHtml.trim()){
       const iframe = document.createElement('iframe');
+      iframe.sandbox = 'allow-popups';
       iframe.style.width = '100%';
       iframe.style.border = '0';
       iframe.style.minHeight = '60vh';
+      iframe.srcdoc = rawHtml;
       host.appendChild(iframe);
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (doc){
-        doc.open();
-        doc.write(rawHtml);
-        doc.close();
-        const resize = () => {
-          try{
-            const h = Math.max(
-              doc.body?.scrollHeight || 0,
-              doc.documentElement?.scrollHeight || 0,
-              400
-            );
-            iframe.style.height = h + 'px';
-          }catch(_){ }
-        };
-        iframe.onload = resize;
-        setTimeout(resize, 60);
-      }
+      const resize = () => {
+        try{
+          const doc = iframe.contentDocument || iframe.contentWindow?.document;
+          const h = Math.max(
+            doc?.body?.scrollHeight || 0,
+            doc?.documentElement?.scrollHeight || 0,
+            400
+          );
+          iframe.style.height = h + 'px';
+        }catch(_){ }
+      };
+      iframe.onload = resize;
+      setTimeout(resize, 300);
     } else if (rawText.trim()){
       const pre = document.createElement('pre');
       pre.style.whiteSpace = 'pre-wrap';

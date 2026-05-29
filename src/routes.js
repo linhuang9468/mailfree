@@ -4,6 +4,25 @@ import { extractEmail } from './commonUtils.js';
 import { getDatabaseWithValidation } from './dbConnectionHelper.js';
 
 /**
+ * Constant-time string comparison to prevent timing attacks.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  let diff = 0;
+  for (let i = 0; i < bufA.byteLength; i++) {
+    diff |= bufA[i] ^ bufB[i];
+  }
+  return diff === 0;
+}
+
+/**
  * 路由处理器类，用于管理所有API路由
  */
 export class Router {
@@ -188,7 +207,8 @@ export async function authMiddleware(context) {
 
   // 检查超级管理员权限覆盖
   const JWT_TOKEN = env.JWT_TOKEN || env.JWT_SECRET || '';
-  const root = checkRootAdminOverride(request, JWT_TOKEN);
+  const ADMIN_TOKEN = env.ADMIN_TOKEN || '';
+  const root = checkRootAdminOverride(request, JWT_TOKEN, ADMIN_TOKEN);
   if (root) {
     context.authPayload = root;
     return null;
@@ -249,20 +269,15 @@ async function verifyJwtWithCache(JWT_TOKEN, cookieHeader) {
  * @param {string} JWT_TOKEN - JWT密钥令牌
  * @returns {object|null} 超级管理员权限对象，如果不是超级管理员则返回null
  */
-function checkRootAdminOverride(request, JWT_TOKEN) {
+function checkRootAdminOverride(request, JWT_TOKEN, ADMIN_TOKEN) {
   try {
-    if (!JWT_TOKEN) return null;
+    const token = ADMIN_TOKEN || JWT_TOKEN;
+    if (!token) return null;
     const auth = request.headers.get('Authorization') || request.headers.get('authorization') || '';
     const xToken = request.headers.get('X-Admin-Token') || request.headers.get('x-admin-token') || '';
-    let urlToken = '';
-    try {
-      const u = new URL(request.url);
-      urlToken = u.searchParams.get('admin_token') || '';
-    } catch (_) { }
     const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-    if (bearer && bearer === JWT_TOKEN) return { role: 'admin', username: '__root__', userId: 0 };
-    if (xToken && xToken === JWT_TOKEN) return { role: 'admin', username: '__root__', userId: 0 };
-    if (urlToken && urlToken === JWT_TOKEN) return { role: 'admin', username: '__root__', userId: 0 };
+    if (bearer && timingSafeEqual(bearer, token)) return { role: 'admin', username: '__root__', userId: 0 };
+    if (xToken && timingSafeEqual(xToken, token)) return { role: 'admin', username: '__root__', userId: 0 };
     return null;
   } catch (_) {
     return null;
@@ -275,8 +290,8 @@ function checkRootAdminOverride(request, JWT_TOKEN) {
  * @param {string} JWT_TOKEN - JWT密钥令牌
  * @returns {Promise<object|false>} 认证负载对象，验证失败返回false
  */
-export async function resolveAuthPayload(request, JWT_TOKEN) {
-  const root = checkRootAdminOverride(request, JWT_TOKEN);
+export async function resolveAuthPayload(request, JWT_TOKEN, ADMIN_TOKEN) {
+  const root = checkRootAdminOverride(request, JWT_TOKEN, ADMIN_TOKEN);
   if (root) return root;
   return await verifyJwtWithCache(JWT_TOKEN, request.headers.get('Cookie') || '');
 }
@@ -285,12 +300,41 @@ export async function resolveAuthPayload(request, JWT_TOKEN) {
  * 创建并配置路由器
  * @returns {Router} 配置好的路由器实例
  */
+// Simple in-memory rate limiter for login attempts (per-IP, 5 attempts / 60s window)
+const LOGIN_RATE_LIMIT_WINDOW = 60_000;
+const LOGIN_RATE_LIMIT_MAX = 5;
+if (!globalThis.__LOGIN_RATE_MAP__) globalThis.__LOGIN_RATE_MAP__ = new Map();
+
+function checkLoginRateLimit(ip) {
+  const now = Date.now();
+  const map = globalThis.__LOGIN_RATE_MAP__;
+  // Periodic cleanup
+  if (map.size > 10_000) {
+    for (const [k, v] of map) { if (now - v.start > LOGIN_RATE_LIMIT_WINDOW) map.delete(k); }
+  }
+  const entry = map.get(ip);
+  if (!entry || now - entry.start > LOGIN_RATE_LIMIT_WINDOW) {
+    map.set(ip, { count: 1, start: now });
+    return true;
+  }
+  entry.count++;
+  if (entry.count > LOGIN_RATE_LIMIT_MAX) return false;
+  return true;
+}
+
 export function createRouter() {
   const router = new Router();
 
   // =================== 认证相关路由 ===================
   router.post('/api/login', async (context) => {
     const { request, env } = context;
+
+    // Rate limit login attempts per IP
+    const clientIp = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
+    if (!checkLoginRateLimit(clientIp)) {
+      return new Response('登录尝试过于频繁，请稍后再试', { status: 429 });
+    }
+
     let DB;
     try {
       DB = await getDatabaseWithValidation(env);
@@ -313,7 +357,7 @@ export function createRouter() {
       }
 
       // 1) 管理员：用户名匹配 ADMIN_NAME + 密码匹配 ADMIN_PASSWORD
-      if (name === ADMIN_NAME && ADMIN_PASSWORD && password === ADMIN_PASSWORD) {
+      if (name === ADMIN_NAME && ADMIN_PASSWORD && timingSafeEqual(password, ADMIN_PASSWORD)) {
         let adminUserId = 0;
         try {
           const u = await DB.prepare('SELECT id FROM users WHERE username = ?').bind(ADMIN_NAME).all();
@@ -335,7 +379,7 @@ export function createRouter() {
       }
 
       // 2) 访客：用户名为 guest 且密码匹配 GUEST_PASSWORD
-      if (name === 'guest' && GUEST_PASSWORD && password === GUEST_PASSWORD) {
+      if (name === 'guest' && GUEST_PASSWORD && timingSafeEqual(password, GUEST_PASSWORD)) {
         const token = await createJwt(JWT_TOKEN, { role: 'guest', username: 'guest' });
         const headers = new Headers({ 'Content-Type': 'application/json' });
         headers.set('Set-Cookie', buildSessionCookie(token, request.url));
