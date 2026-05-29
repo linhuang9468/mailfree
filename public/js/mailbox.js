@@ -427,12 +427,12 @@ function showEmailModal(email) {
         <span>复制内容</span>
       </button>
       ${code ? `
-        <button class=\"btn btn-primary btn-sm\" onclick=\"copyCodeInModal('${code}', this)\">
+        <button class=\"btn btn-primary btn-sm\" onclick=\"copyCodeInModal('${escapeHtml(code).replace(/'/g,'\&#39;')}', this)\">
           <span class=\"btn-icon\">🔐</span>
           <span>复制验证码</span>
         </button>
       ` : ''}
-      ${email.download ? `<a class="btn btn-ghost btn-sm" href="${email.download}" download><span class="btn-icon">⬇️</span><span>下载原始邮件</span></a>` : ''}
+      ${email.download ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(email.download)}" download><span class="btn-icon">⬇️</span><span>下载原始邮件</span></a>` : ''}
     </div>
     <div id="email-render-host"></div>
   `;
@@ -440,24 +440,21 @@ function showEmailModal(email) {
   const host = document.getElementById('email-render-host');
   if (rawHtml.trim()){
     const iframe = document.createElement('iframe');
+    iframe.sandbox = 'allow-popups';
     iframe.style.width = '100%';
     iframe.style.border = '0';
     iframe.style.minHeight = '60vh';
+    iframe.srcdoc = rawHtml;
     host.appendChild(iframe);
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (doc){
-      doc.open();
-      doc.write(rawHtml);
-      doc.close();
-      const resize = () => {
-        try{
-          const h = Math.max(doc.body?.scrollHeight || 0, doc.documentElement?.scrollHeight || 0, 400);
-          iframe.style.height = h + 'px';
-        }catch(_){ }
-      };
-      iframe.onload = resize;
-      setTimeout(resize, 60);
-    }
+    const resize = () => {
+      try{
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        const h = Math.max(doc?.body?.scrollHeight || 0, doc?.documentElement?.scrollHeight || 0, 400);
+        iframe.style.height = h + 'px';
+      }catch(_){ }
+    };
+    iframe.onload = resize;
+    setTimeout(resize, 300);
   } else if (rawText.trim()){
     const pre = document.createElement('pre');
     pre.style.whiteSpace = 'pre-wrap';

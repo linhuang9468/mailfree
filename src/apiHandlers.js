@@ -241,7 +241,7 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       if (password){ passwordHash = await sha256Hex(password); }
       const user = await createUser(db, { username, passwordHash, role, mailboxLimit });
       return Response.json(user);
-    }catch(e){ return new Response('创建失败: ' + (e?.message || e), { status: 500 }); }
+    }catch(e){ console.error('创建失败:', e); return new Response('创建失败', { status: 500 }); }
   }
 
   if (!isMock && request.method === 'PATCH' && path.startsWith('/api/users/')){
@@ -257,7 +257,7 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       if (typeof body.password === 'string' && body.password){ fields.password_hash = await sha256Hex(String(body.password)); }
       await updateUser(db, id, fields);
       return Response.json({ success: true });
-    }catch(e){ return new Response('更新失败: ' + (e?.message || e), { status: 500 }); }
+    }catch(e){ console.error('更新失败:', e); return new Response('更新失败', { status: 500 }); }
   }
 
   if (!isMock && request.method === 'DELETE' && path.startsWith('/api/users/')){
@@ -265,7 +265,7 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
     const id = Number(path.split('/')[3]);
     if (!id) return new Response('无效ID', { status: 400 });
     try{ await deleteUser(db, id); return Response.json({ success: true }); }
-    catch(e){ return new Response('删除失败: ' + (e?.message || e), { status: 500 }); }
+    catch(e){ console.error('删除失败:', e); return new Response('删除失败', { status: 500 }); }
   }
 
   if (!isMock && path === '/api/users/assign' && request.method === 'POST'){
@@ -277,7 +277,7 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       if (!username || !address) return new Response('参数不完整', { status: 400 });
       const result = await assignMailboxToUser(db, { username, address });
       return Response.json(result);
-    }catch(e){ return new Response('分配失败: ' + (e?.message || e), { status: 500 }); }
+    }catch(e){ console.error('分配失败:', e); return new Response('分配失败', { status: 500 }); }
   }
 
   if (!isMock && request.method === 'GET' && path.startsWith('/api/users/') && path.endsWith('/mailboxes')){
@@ -425,7 +425,8 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       });
       return Response.json({ success: true, id: result.id });
     }catch(e){
-      return new Response('发送失败: ' + e.message, { status: 500 });
+      console.error('发送失败:', e);
+      return new Response('发送失败', { status: 500 });
     }
   }
 
@@ -479,7 +480,8 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       }catch(_){/* ignore */}
       return Response.json({ success: true, result });
     }catch(e){
-      return new Response('批量发送失败: ' + e.message, { status: 500 });
+      console.error('批量发送失败:', e);
+      return new Response('批量发送失败', { status: 500 });
     }
   }
 
@@ -492,7 +494,8 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       const data = await getEmailFromResend(RESEND_API_KEY, id);
       return Response.json(data);
     }catch(e){
-      return new Response('查询失败: ' + e.message, { status: 500 });
+      console.error('查询失败:', e);
+      return new Response('查询失败', { status: 500 });
     }
   }
 
@@ -515,7 +518,8 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       }
       return Response.json(data || { ok: true });
     }catch(e){
-      return new Response('更新失败: ' + e.message, { status: 500 });
+      console.error('更新失败:', e);
+      return new Response('更新失败', { status: 500 });
     }
   }
 
@@ -529,19 +533,22 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       await updateSentEmail(db, id, { status: 'canceled' });
       return Response.json(data);
     }catch(e){
-      return new Response('取消失败: ' + e.message, { status: 500 });
+      console.error('取消失败:', e);
+      return new Response('取消失败', { status: 500 });
     }
   }
 
   // 删除发件记录
   if (request.method === 'DELETE' && path.startsWith('/api/sent/')){
     if (isMock) return new Response('演示模式不可操作', { status: 403 });
+    if (!isStrictAdmin()) return new Response('Forbidden', { status: 403 });
     const id = path.split('/')[3];
     try{
       await db.prepare('DELETE FROM sent_emails WHERE id = ?').bind(id).run();
       return Response.json({ success: true });
     }catch(e){
-      return new Response('删除发件记录失败: ' + e.message, { status: 500 });
+      console.error('删除发件记录失败:', e);
+      return new Response('删除发件记录失败', { status: 500 });
     }
   }
 
@@ -724,7 +731,8 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       const result = await toggleMailboxPin(db, address, uid);
       return Response.json({ success: true, ...result });
     } catch (e) {
-      return new Response('操作失败: ' + e.message, { status: 500 });
+      console.error('操作失败:', e);
+      return new Response('操作失败', { status: 500 });
     }
   }
 
@@ -751,7 +759,8 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       
       return Response.json({ success: true, can_login: canLogin });
     } catch (e) {
-      return new Response('操作失败: ' + e.message, { status: 500 });
+      console.error('操作失败:', e);
+      return new Response('操作失败', { status: 500 });
     }
   }
 
@@ -782,7 +791,8 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       
       return Response.json({ success: true });
     } catch (e) {
-      return new Response('操作失败: ' + e.message, { status: 500 });
+      console.error('操作失败:', e);
+      return new Response('操作失败', { status: 500 });
     }
   }
 
@@ -916,6 +926,17 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
     }
     
     try {
+      // Ownership check: non-admin users can only delete emails from their own mailboxes
+      if (!isStrictAdmin()) {
+        const payload = getJwtPayload();
+        const uid = Number(payload?.userId || 0);
+        if (!uid) return new Response('Forbidden', { status: 403 });
+        const { results: ownerCheck } = await db.prepare(
+          `SELECT 1 FROM messages m JOIN user_mailboxes um ON um.mailbox_id = m.mailbox_id WHERE m.id = ? AND um.user_id = ?`
+        ).bind(emailId, uid).all();
+        if (!ownerCheck || !ownerCheck.length) return new Response('Forbidden', { status: 403 });
+      }
+
       // 先检查邮件是否存在
       const existsResult = await db.prepare(`SELECT COUNT(*) as count FROM messages WHERE id = ?`).bind(emailId).all();
       const existsBefore = existsResult.results[0]?.count || 0;
@@ -939,7 +960,7 @@ export async function handleApiRequest(request, db, mailDomains, options = { moc
       });
     } catch (e) {
       console.error('删除邮件失败:', e);
-      return new Response('删除邮件时发生错误: ' + e.message, { status: 500 });
+      return new Response('删除邮件时发生错误', { status: 500 });
     }
   }
 
